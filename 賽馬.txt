@@ -1,0 +1,109 @@
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import csv
+import os
+
+# 指定文件夾路徑和CSV文件名稱
+folder_path = "C:\\Users\\User\\Desktop\\賽馬"
+csv_file_name = "2020-2023賽馬賽事.csv"
+
+# 確保文件夾存在，如果不存在則創建它
+if not os.path.exists(folder_path):
+    os.makedirs(folder_path)
+
+# 組合完整的CSV文件路徑
+csv_file_path = os.path.join(folder_path, csv_file_name)
+
+# 使用請求headers
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.3"}
+
+def fetch_race_data(race_url, race_date):
+    response_race = requests.get(race_url, headers=headers)
+
+
+    if response_race.status_code != 200:
+        print(f"無法獲取比賽信息，比賽URL: {race_url}")
+        return []
+
+    response_race.encoding = 'EUC-JP'
+    soup_race = BeautifulSoup(response_race.text, 'html.parser')
+    race_data_list = []
+
+    race_info = soup_race.find("div", {"class": "mainrace_data fc"})
+    if not race_info:
+        print(f"無法獲取比賽信息，比賽URL: {race_url}")
+        return []
+
+    race_name = race_info.find("h1").text.strip()
+    span_text = race_info.find("span").text.strip().replace("\xa0", " ").replace("/", "、")
+    split_text = span_text.split("、")
+    distance = split_text[0] if len(split_text) > 0 else ""
+    weather = split_text[1] if len(split_text) > 1 else ""
+    race_number = soup_race.find("dt").text.strip()
+
+
+
+    race_place_links = soup_race.select("ul.race_place.fc a.active")
+    race_place = race_place_links[0].text if race_place_links else ""
+
+    race_table = soup_race.find("table", {"class": "race_table_01 nk_tb_common"})
+    if race_table:
+        rows = race_table.find_all("tr")
+        for row in rows[1:]:
+            cols = row.find_all("td")
+            if len(cols) >= 21:
+                race_data_list.append({
+                    '賽事時間': race_date,
+                    '地點': race_place,
+                    '場名': race_name,
+                    '場次': race_number,
+                    '距離': distance,
+                    '天氣': weather,
+                    '名次': cols[0].text.strip(),
+                    '馬名': cols[3].text.strip(),
+                    '性別年紀': cols[4].text.strip(),
+                    '馬重量': cols[14].text.strip(),
+                    '騎手': cols[6].text.strip(),
+                    '重量': cols[5].text.strip(),
+                    '抵達時間': cols[7].text.strip(),
+                    '單柱賠率': cols[12].text.strip(),
+                    '獎金': cols[20].text.strip()
+                })
+    return race_data_list
+
+with open(csv_file_path, mode='w', newline='', encoding='utf-8-sig') as csv_file:
+    fieldnames = ['賽事時間', '地點', '場名', '場次', '距離', '天氣', '名次', '馬名', '性別年紀', '馬重量', '騎手', '重量', '抵達時間', '單柱賠率', '獎金']
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    writer.writeheader()
+
+    start_date = datetime(2020, 1, 1)
+    end_date = datetime(2023, 10, 1)
+    
+    current_date = start_date
+    while current_date <= end_date:
+        formatted_date = current_date.strftime("%Y%m%d")
+        date_url = f"https://db.netkeiba.com/race/list/{formatted_date}/"
+        
+        response_date = requests.get(date_url, headers=headers)
+        if response_date.status_code != 200:
+            print(f"無法獲取日期信息，日期URL: {date_url}")
+            current_date += timedelta(days=1)
+            continue
+
+        soup_date = BeautifulSoup(response_date.text, 'html.parser')
+        race_links = [a["href"] for a in soup_date.select(".race_top_data_info a") if "/movie/" not in a["href"]]
+
+
+        if not race_links:
+            print(f"{formatted_date} 沒有賽事。")
+            current_date += timedelta(days=1)
+            continue
+
+        for race_link in race_links:
+            race_data = fetch_race_data(f"https://db.netkeiba.com{race_link}", formatted_date)
+            for item in race_data:
+                writer.writerow(item)
+        print(f"{formatted_date} 完成。")
+        current_date += timedelta(days=1)
